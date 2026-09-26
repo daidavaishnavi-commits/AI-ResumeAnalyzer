@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-5 text-center">
+        <h1 class="h3 fw-semibold mb-3">Read your resume the way a parser does</h1>
+        <p class="text-secondary mb-4">
+          Upload a PDF resume and see exactly what text ResumeIQ can extract, page by page
+          and line by line. Job matching is built on top of this in the next stage.
+        </p>
+        <a class="btn btn-primary btn-lg" href="{{ url_for('analyze.upload_form') }}">Upload a resume</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

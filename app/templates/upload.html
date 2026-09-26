@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Upload resume &middot; ResumeIQ{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4 p-md-5">
+        <h1 class="h4 fw-semibold mb-1">Upload your resume</h1>
+        <p class="text-secondary small mb-4">PDF only, up to {{ config.MAX_CONTENT_LENGTH // (1024 * 1024) }} MB.</p>
+
+        <form method="post" action="{{ url_for('analyze.upload') }}" enctype="multipart/form-data" id="upload-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <label class="dropzone w-100 text-center p-5 mb-3" id="dropzone" for="resume">
+            <div class="fw-medium">Drag and drop a PDF here</div>
+            <div class="text-secondary small">or click to choose a file</div>
+            <div class="mt-2 small text-primary" id="file-name"></div>
+            <input class="visually-hidden" type="file" id="resume" name="resume" accept="application/pdf,.pdf" required>
+          </label>
+
+          <button class="btn btn-primary w-100" type="submit" id="submit-btn">Extract text</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+{% endblock %}
