@@ -1,0 +1,39 @@
+:root {
+  --bs-primary: #4f46e5;
+  --bs-primary-rgb: 79, 70, 229;
+  --riq-radius: 12px;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.card {
+  border-radius: var(--riq-radius);
+}
+
+.btn-primary {
+  --bs-btn-bg: #4f46e5;
+  --bs-btn-border-color: #4f46e5;
+  --bs-btn-hover-bg: #4338ca;
+  --bs-btn-hover-border-color: #4338ca;
+}
+
+.text-primary {
+  color: #4f46e5 !important;
+}
+
+.dropzone {
+  display: block;
+  border: 2px dashed #cbd5e1;
+  border-radius: var(--riq-radius);
+  background: #f8fafc;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.dropzone:hover,
+.dropzone.is-dragover {
+  border-color: #4f46e5;
+  background: #eef2ff;
+}

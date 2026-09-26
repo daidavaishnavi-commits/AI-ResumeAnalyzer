@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Extracted text &middot; ResumeIQ{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
+  <div>
+    <h1 class="h4 fw-semibold mb-0">Extracted text</h1>
+    <p class="text-secondary small mb-0">{{ filename }}</p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('analyze.upload_form') }}">Upload another</a>
+</div>
+
+<div class="row g-3 mb-3">
+  {% for label, value in [
+    ('Pages', extraction.page_count),
+    ('Lines', extraction.line_count),
+    ('Words', extraction.word_count),
+    ('Characters', extraction.char_count),
+    ('Extractor', extraction.method),
+  ] %}
+  <div class="col-6 col-md">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body py-3">
+        <div class="text-secondary text-uppercase small">{{ label }}</div>
+        <div class="fs-5 fw-semibold">{{ value }}</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <span class="fw-medium">Lines with page and line numbers</span>
+    {% if truncated %}<span class="badge text-bg-secondary">first {{ lines|length }} lines</span>{% endif %}
+  </div>
+  <div class="table-responsive" style="max-height: 32rem;">
+    <table class="table table-sm table-hover mb-0 align-middle">
+      <thead class="table-light sticky-top">
+        <tr><th style="width:5rem;">Page</th><th style="width:5rem;">Line</th><th>Text</th></tr>
+      </thead>
+      <tbody>
+        {% for line in lines %}
+        <tr>
+          <td class="text-secondary small">{{ line.page }}</td>
+          <td class="text-secondary small">{{ line.index }}</td>
+          <td class="font-monospace small">{{ line.text }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="text-center text-secondary py-4">No text was extracted.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
