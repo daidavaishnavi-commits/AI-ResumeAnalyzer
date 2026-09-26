@@ -29,6 +29,7 @@ def upload():
             request.files.get("resume"),
             current_app.config["UPLOAD_FOLDER"],
             current_app.config["MAX_CONTENT_LENGTH"],
+            keep_file=current_app.config["KEEP_UPLOADED_FILES"],
         )
     except ResumeIQError as error:
         current_app.logger.info(

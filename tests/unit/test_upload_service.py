@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import io
+import os
+import time
 from pathlib import Path
 
 import pytest
 from werkzeug.datastructures import FileStorage
 
-from app.core.errors import EmptyDocumentError, FileTooLargeError, UnsupportedFileError
+from app.core.errors import EncryptedPdfError, FileTooLargeError, UnsupportedFileError
 from app.services import upload_service
 
 MAX_BYTES = 5 * 1024 * 1024
@@ -69,13 +71,53 @@ def test_process_upload_returns_extraction(sample_pdf: Path, tmp_path: Path):
     )
 
     assert result.extraction.page_count == 2
+
+
+def test_process_upload_deletes_the_file_after_a_successful_extraction(
+    sample_pdf: Path, tmp_path: Path
+):
+    upload_folder = tmp_path / "uploads"
+
+    for _ in range(3):
+        result = upload_service.process_upload(storage_from(sample_pdf), upload_folder, MAX_BYTES)
+        assert result.extraction.page_count == 2
+
+    assert list(upload_folder.glob("*.pdf")) == []
+    assert result.file_retained is False
+
+
+def test_process_upload_can_keep_the_file_when_asked(sample_pdf: Path, tmp_path: Path):
+    upload_folder = tmp_path / "uploads"
+
+    result = upload_service.process_upload(
+        storage_from(sample_pdf), upload_folder, MAX_BYTES, keep_file=True
+    )
+
+    assert result.file_retained is True
     assert result.stored_file.path.exists()
 
 
-def test_process_upload_deletes_the_file_when_extraction_fails(empty_pdf: Path, tmp_path: Path):
+def test_process_upload_deletes_the_file_when_extraction_fails(encrypted_pdf: Path, tmp_path: Path):
     upload_folder = tmp_path / "uploads"
 
-    with pytest.raises(EmptyDocumentError):
-        upload_service.process_upload(storage_from(empty_pdf), upload_folder, MAX_BYTES)
+    with pytest.raises(EncryptedPdfError):
+        upload_service.process_upload(storage_from(encrypted_pdf), upload_folder, MAX_BYTES)
 
     assert list(upload_folder.glob("*.pdf")) == []
+
+
+def test_purge_old_uploads_removes_only_stale_files(tmp_path: Path):
+    upload_folder = tmp_path / "uploads"
+    upload_folder.mkdir()
+    stale = upload_folder / "stale.pdf"
+    fresh = upload_folder / "fresh.pdf"
+    stale.write_bytes(b"%PDF-1.4")
+    fresh.write_bytes(b"%PDF-1.4")
+    old = time.time() - 3600
+    os.utime(stale, (old, old))
+
+    removed = upload_service.purge_old_uploads(upload_folder, max_age_seconds=60)
+
+    assert removed == 1
+    assert not stale.exists()
+    assert fresh.exists()

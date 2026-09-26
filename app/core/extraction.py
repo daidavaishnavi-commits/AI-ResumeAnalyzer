@@ -38,13 +38,38 @@ def _read_with_pdfplumber(path: Path) -> list[Page]:
     return pages
 
 
+def is_encrypted(path: Path) -> bool:
+    """Is the PDF password protected in a way that blocks reading?
+
+    Many PDFs are "encrypted" with an empty owner password and open fine, so an
+    empty password is tried before declaring the file locked.
+    """
+    try:
+        reader = pypdf.PdfReader(str(path))
+    except pypdf.errors.FileNotDecryptedError:
+        return True
+    except pypdf.errors.PdfReadError:
+        return False
+
+    if not reader.is_encrypted:
+        return False
+
+    try:
+        return reader.decrypt("") == pypdf.PasswordType.NOT_DECRYPTED
+    except Exception as exc:
+        logger.info("could not decrypt %s: %s", path.name, exc)
+        return True
+
+
 def _read_with_pypdf(path: Path) -> list[Page]:
     reader = pypdf.PdfReader(str(path))
     if reader.is_encrypted:
         try:
-            reader.decrypt("")
-        except Exception as exc:  # pragma: no cover - depends on the file
+            decrypted = reader.decrypt("") != pypdf.PasswordType.NOT_DECRYPTED
+        except Exception as exc:
             raise EncryptedPdfError(technical_detail=str(exc)) from exc
+        if not decrypted:
+            raise EncryptedPdfError(technical_detail="empty password was rejected")
 
     pages: list[Page] = []
     for number, page in enumerate(reader.pages, start=1):
@@ -67,12 +92,17 @@ def extract_pages(path: str | Path) -> tuple[list[Page], str, list[str]]:
         if not is_pdf_bytes(handle.read(1024)):
             raise CorruptPdfError(technical_detail="missing %PDF- header")
 
+    if is_encrypted(path):
+        raise EncryptedPdfError(technical_detail="PDF is password protected")
+
     warnings: list[str] = []
     pages: list[Page] = []
     method = "pdfplumber"
 
     try:
         pages = _read_with_pdfplumber(path)
+    except EncryptedPdfError:
+        raise
     except Exception as exc:
         logger.warning("pdfplumber failed for %s: %s", path.name, exc)
         warnings.append("Primary extractor failed; used the fallback extractor.")
@@ -89,7 +119,10 @@ def extract_pages(path: str | Path) -> tuple[list[Page], str, list[str]]:
             else:
                 raise CorruptPdfError(technical_detail=str(exc)) from exc
         else:
-            if _total_chars(fallback_pages) > _total_chars(pages):
+            # An image-only PDF yields zero characters from both extractors; the
+            # fallback pages are still used so the document is reported as
+            # scanned rather than as unreadable.
+            if not pages or _total_chars(fallback_pages) > _total_chars(pages):
                 if pages:
                     warnings.append("Primary extractor found little text; used the fallback.")
                 pages = fallback_pages
@@ -101,11 +134,13 @@ def extract_pages(path: str | Path) -> tuple[list[Page], str, list[str]]:
     return pages, method, warnings
 
 
-def extract_text(path: str | Path, allow_empty: bool = False) -> ExtractionResult:
+def extract_text(path: str | Path, strict: bool = False) -> ExtractionResult:
     """Extract and clean the text of a resume PDF.
 
-    Raises `EmptyDocumentError` for documents with (almost) no text, unless
-    `allow_empty` is set, in which case the result is flagged instead.
+    A structurally valid PDF that holds scanned images rather than text is not
+    an error: the result comes back with `is_probably_scanned` set and a
+    warning saying OCR is not available, so nothing pretends text was read.
+    Pass `strict=True` to raise `EmptyDocumentError` for such a document.
     """
     pages, method, warnings = extract_pages(path)
 
@@ -119,11 +154,14 @@ def extract_text(path: str | Path, allow_empty: bool = False) -> ExtractionResul
     )
 
     if is_probably_scanned:
-        if not allow_empty:
+        if strict:
             raise EmptyDocumentError(
                 technical_detail=f"only {char_count} characters over {len(pages)} page(s)"
             )
-        warnings.append("Very little text was found; this may be a scanned PDF.")
+        warnings.append(
+            "Almost no text could be read, so this is probably a scanned or image-only "
+            "PDF. ResumeIQ does not run OCR, so please upload a text-based PDF."
+        )
 
     if len(pages) > 1 and any(page.char_count == 0 for page in pages):
         warnings.append("Some pages contain no text and may be images.")

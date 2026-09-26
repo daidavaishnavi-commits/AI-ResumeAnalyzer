@@ -16,6 +16,11 @@ from app.core.schemas import Line, Page
 
 BULLET_CHARS = "\u2022\u25cf\u25aa\u25e6\u2023\u2043\u00b7\u2219\u25cb\u25a0\u00a7"
 
+# How many lines at the top and bottom of a page can hold a header/footer, and
+# how many words a repeated line needs before it is treated as one.
+EDGE_LINES = 2
+MIN_RUNNING_LINE_WORDS = 3
+
 _QUOTE_MAP = {
     "\u2018": "'",
     "\u2019": "'",
@@ -65,33 +70,68 @@ def clean_line(text: str) -> str:
     return cleaned.strip()
 
 
-def find_repeated_lines(page_texts: list[str], min_pages: int = 2) -> set[str]:
-    """Find running headers/footers: short lines repeated on several pages.
+def _position_keys(line_count: int, position: int) -> list[str]:
+    """Name the page-edge slots a line sits in, e.g. "top:0" or "bottom:1"."""
+    keys = []
+    if position < EDGE_LINES:
+        keys.append(f"top:{position}")
+    from_bottom = line_count - 1 - position
+    if from_bottom < EDGE_LINES:
+        keys.append(f"bottom:{from_bottom}")
+    return keys
 
-    Only the first and last two lines of each page are considered, so a skill
-    listed on every page is never mistaken for a footer.
+
+def looks_like_running_line(text: str) -> bool:
+    """Is this text plausible as a running header/footer rather than content?
+
+    A single word such as "Python" is deliberately not plausible: a skill can
+    legitimately end two pages, and losing it would destroy evidence that later
+    stages need. Headers and footers in practice carry a name, a contact
+    detail, a document title or a page marker.
+    """
+    stripped = text.strip()
+    if not stripped or len(stripped) > 80:
+        return False
+    if _PAGE_NUMBER_RE.match(stripped):
+        return True
+    lowered = stripped.lower()
+    if any(marker in lowered for marker in ("@", "http", "page ", "resume", "curriculum vitae")):
+        return True
+    return len(stripped.split()) >= MIN_RUNNING_LINE_WORDS
+
+
+def find_running_lines(page_texts: list[str], min_pages: int = 2) -> set[tuple[str, str]]:
+    """Find running headers/footers as (position key, text) pairs.
+
+    A line is only treated as an artifact when it repeats in the *same* slot at
+    the top or bottom of at least `min_pages` pages and reads like a header or
+    footer. Matching it by text alone would delete legitimate repeated content
+    from the body of the document.
     """
     if len(page_texts) < min_pages:
         return set()
 
-    counter: Counter[str] = Counter()
+    counter: Counter[tuple[str, str]] = Counter()
     for page_text in page_texts:
-        lines = [line.strip() for line in page_text.splitlines() if line.strip()]
-        candidates = lines[:2] + lines[-2:]
-        for candidate in set(candidates):
-            if len(candidate) <= 80:
-                counter[candidate] += 1
+        lines = [clean_line(line) for line in page_text.splitlines()]
+        lines = [line for line in lines if line]
+        for position, line in enumerate(lines):
+            if not looks_like_running_line(line):
+                continue
+            for key in _position_keys(len(lines), position):
+                counter[(key, line)] += 1
 
-    return {line for line, count in counter.items() if count >= min_pages}
+    return {pair for pair, count in counter.items() if count >= min_pages}
 
 
-def is_noise_line(text: str, repeated: set[str]) -> bool:
+def is_noise_line(text: str, position_keys: list[str], running: set[tuple[str, str]]) -> bool:
+    """Noise is a bare page number, or a running line in its own page slot."""
     stripped = text.strip()
     if not stripped:
         return False
-    if stripped in repeated:
+    if _PAGE_NUMBER_RE.match(stripped):
         return True
-    return bool(_PAGE_NUMBER_RE.match(stripped))
+    return any((key, stripped) in running for key in position_keys)
 
 
 def build_lines(pages: list[Page], drop_repeated: bool = True) -> list[Line]:
@@ -100,15 +140,26 @@ def build_lines(pages: list[Page], drop_repeated: bool = True) -> list[Line]:
     Line-wrapped hyphenated words ("Java-\\nScript") are joined back onto the
     line where the word starts.
     """
-    repeated = find_repeated_lines([page.text for page in pages]) if drop_repeated else set()
+    running = find_running_lines([page.text for page in pages]) if drop_repeated else set()
 
     lines: list[Line] = []
     for page in pages:
-        page_line_index = 0
+        raw_lines = page.text.splitlines()
+        non_blank = [clean_line(raw) for raw in raw_lines]
+        non_blank = [line for line in non_blank if line]
+        seen_non_blank = 0
         pending_hyphen = False
-        for raw in page.text.splitlines():
+
+        for page_line_index, raw in enumerate(raw_lines):
             cleaned = clean_line(raw)
-            if is_noise_line(cleaned, repeated):
+            position_keys: list[str] = []
+            if cleaned:
+                position_keys = _position_keys(len(non_blank), seen_non_blank)
+                seen_non_blank += 1
+
+            if is_noise_line(cleaned, position_keys, running):
+                # A dropped line breaks the adjacency a hyphen wrap relies on.
+                pending_hyphen = False
                 continue
 
             if pending_hyphen and cleaned:
@@ -124,8 +175,11 @@ def build_lines(pages: list[Page], drop_repeated: bool = True) -> list[Line]:
                 pending_hyphen = bool(_HYPHEN_WRAP_RE.search(joined))
                 continue
 
-            if not cleaned and lines and lines[-1].is_blank:
-                continue
+            if not cleaned:
+                # A blank line ends the wrap too: the hyphen was real.
+                pending_hyphen = False
+                if lines and lines[-1].is_blank:
+                    continue
 
             lines.append(
                 Line(
@@ -136,7 +190,6 @@ def build_lines(pages: list[Page], drop_repeated: bool = True) -> list[Line]:
                     page_line_index=page_line_index,
                 )
             )
-            page_line_index += 1
             pending_hyphen = bool(_HYPHEN_WRAP_RE.search(cleaned))
 
     while lines and lines[-1].is_blank:

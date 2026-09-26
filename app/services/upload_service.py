@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,30 @@ class StoredFile:
 class UploadResult:
     stored_file: StoredFile
     extraction: ExtractionResult
+    file_retained: bool = False
+
+
+def purge_old_uploads(upload_folder: str | Path, max_age_seconds: int) -> int:
+    """Delete uploads older than `max_age_seconds`; return how many went.
+
+    Files are normally removed as soon as they have been read, so this only
+    catches leftovers from a crash or a hard restart.
+    """
+    folder = Path(upload_folder)
+    if not folder.is_dir():
+        return 0
+
+    cutoff = time.time() - max_age_seconds
+    removed = 0
+    for path in folder.glob("*.pdf"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+                removed += 1
+        except OSError as exc:
+            logger.warning("could not remove stale upload %s: %s", path.name, exc)
+
+    return removed
 
 
 def has_allowed_extension(filename: str) -> bool:
@@ -104,9 +129,18 @@ def store_upload(storage: FileStorage, upload_folder: str | Path) -> StoredFile:
 
 
 def process_upload(
-    storage: FileStorage | None, upload_folder: str | Path, max_bytes: int
+    storage: FileStorage | None,
+    upload_folder: str | Path,
+    max_bytes: int,
+    keep_file: bool = False,
 ) -> UploadResult:
-    """Validate, store and extract. The file is removed if extraction fails."""
+    """Validate, store and extract a resume.
+
+    The PDF is deleted once the text has been read, whether extraction
+    succeeded or not, because Stage 1 only needs the extracted text and kept
+    files would grow without bound. `keep_file=True` is the hook for the later
+    stage that stores resumes against a database row.
+    """
     validate_upload(storage, max_bytes)
     assert storage is not None  # guaranteed by validate_upload
 
@@ -121,4 +155,8 @@ def process_upload(
         logger.exception("unexpected extraction failure for %s", stored_file.stored_filename)
         raise ResumeIQError(technical_detail=str(exc)) from exc
 
-    return UploadResult(stored_file=stored_file, extraction=result)
+    # Only now that extraction has finished reading the file is it safe to go.
+    if not keep_file:
+        stored_file.delete()
+
+    return UploadResult(stored_file=stored_file, extraction=result, file_retained=keep_file)

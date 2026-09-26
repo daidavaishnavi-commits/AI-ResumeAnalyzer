@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.core import extraction
-from app.core.errors import CorruptPdfError, EmptyDocumentError
+from app.core.errors import CorruptPdfError, EmptyDocumentError, EncryptedPdfError
 
 
 def test_is_pdf_bytes():
@@ -52,13 +52,37 @@ def test_extract_text_rejects_missing_file(tmp_path: Path):
         extraction.extract_text(tmp_path / "nope.pdf")
 
 
-def test_extract_text_flags_scanned_pdf(empty_pdf: Path):
-    with pytest.raises(EmptyDocumentError):
-        extraction.extract_text(empty_pdf)
+def test_extract_text_flags_scanned_pdf_instead_of_failing(empty_pdf: Path):
+    result = extraction.extract_text(empty_pdf)
 
-    result = extraction.extract_text(empty_pdf, allow_empty=True)
     assert result.is_probably_scanned
-    assert result.warnings
+    assert any("OCR" in warning or "scanned" in warning for warning in result.warnings)
+
+
+def test_extract_text_strict_mode_rejects_scanned_pdf(empty_pdf: Path):
+    with pytest.raises(EmptyDocumentError):
+        extraction.extract_text(empty_pdf, strict=True)
+
+
+def test_image_only_pdf_succeeds_and_is_flagged(image_only_pdf: Path):
+    """A readable PDF with zero extractable characters is scanned, not corrupt."""
+    result = extraction.extract_text(image_only_pdf)
+
+    assert result.page_count == 1
+    assert result.char_count == 0
+    assert result.is_probably_scanned
+    assert any("OCR" in warning for warning in result.warnings)
+
+
+def test_encrypted_pdf_reports_password_protection(encrypted_pdf: Path):
+    with pytest.raises(EncryptedPdfError) as excinfo:
+        extraction.extract_text(encrypted_pdf)
+
+    assert "password" in excinfo.value.user_message.lower()
+
+
+def test_is_encrypted_is_false_for_a_normal_pdf(sample_pdf: Path):
+    assert not extraction.is_encrypted(sample_pdf)
 
 
 def test_extract_pages_falls_back_to_pypdf(monkeypatch, sample_pdf: Path):

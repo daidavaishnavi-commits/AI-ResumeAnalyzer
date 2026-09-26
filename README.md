@@ -15,9 +15,14 @@ python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements-dev.txt
 
-cp .env.example .env              # set SECRET_KEY
-python run.py                     # http://127.0.0.1:5000
+cp .env.example .env              # set FLASK_CONFIG=development and SECRET_KEY
+FLASK_CONFIG=development python run.py    # http://127.0.0.1:5000
 ```
+
+`FLASK_CONFIG` must be one of `development`, `testing` or `production`. An unknown value is
+rejected and an unset value means `production`, so a typo can never start the app with debug
+settings. `production` refuses to start unless `SECRET_KEY` is set in the environment, and
+never enables Flask's interactive debugger.
 
 Extract text from a PDF without starting the server:
 
@@ -29,7 +34,7 @@ python scripts/analyze_cli.py path/to/resume.pdf --json
 ## Tests
 
 ```bash
-pytest                                  # 40 tests
+pytest                                  # 65 tests
 pytest --cov=app --cov-report=term-missing
 ruff check . && ruff format --check .
 ```
@@ -46,18 +51,23 @@ upload  →  validate  →  store  →  extract  →  clean  →  ExtractionResu
 2. **Store**: saved as `<uuid>.pdf` inside `instance/uploads/` via `secure_filename`, so an
    uploaded name can never escape the upload folder. The original name is kept only as
    metadata, together with a SHA-256 hash for later de-duplication.
-3. **Extract** (`app/core/extraction.py`): `pdfplumber` first; `pypdf` is used as a fallback
-   when pdfplumber raises or finds almost no text.
+3. **Extract** (`app/core/extraction.py`): password-protected files are detected up front and
+   reported as such; then `pdfplumber` runs first, with `pypdf` as a fallback when pdfplumber
+   raises or finds almost no text.
 4. **Clean** (`app/core/cleaning.py`): unicode/ligature normalization, bullet characters and
    unmapped `(cid:NNN)` glyphs turned into `- `, hyphenated line wraps rejoined, whitespace
-   squeezed, repeated running headers/footers and bare page numbers dropped. One input line
-   stays one output line, so line numbers remain meaningful.
+   squeezed, bare page numbers dropped, and running headers/footers dropped only when the
+   same header-like text repeats in the same slot at the top or bottom of several pages — a
+   repeated skill such as `Python` is kept as evidence. One input line stays one output line,
+   and `page_line_index` keeps pointing at the original line even when lines are dropped.
 5. **Result** (`app/core/schemas.py`): `ExtractionResult` with the full text, a list of
    `Line(text, original_text, page, index, page_line_index)`, per-page text, the extractor
    used, counts, a `is_probably_scanned` flag and human-readable warnings.
 
-A PDF with almost no extractable text raises `EmptyDocumentError` instead of being passed on
-as an empty resume — scanned resumes are reported, not silently accepted.
+A structurally valid PDF that contains almost no extractable text (a scan or an image-only
+export) is not an error: the result comes back with `is_probably_scanned = True` and a warning
+saying that ResumeIQ does not run OCR. Nothing pretends text was read. Pass `strict=True` to
+`extract_text` (or `--strict` on the CLI) to raise `EmptyDocumentError` instead.
 
 ## Layout
 
@@ -68,7 +78,7 @@ app/
   extensions.py      CSRF protection
   core/              pure Python, no Flask: extraction, cleaning, schemas, errors
   routes/            main + analyze blueprints (thin: validate → service → template)
-  services/          upload_service: validate, store, extract, clean up on failure
+  services/          upload_service: validate, store, extract, delete the file afterwards
   templates/         Bootstrap 5 pages, error pages, partials
   static/            theme.css, upload.js (drag & drop)
 scripts/analyze_cli.py   run the pipeline from the terminal
@@ -94,5 +104,6 @@ database.** That is what makes the analysis engine testable and runnable from th
 
 ## Privacy
 
-Resumes contain personal data. Uploaded files stay in `instance/uploads/`, which is
-gitignored, and are deleted automatically if extraction fails.
+Resumes contain personal data. Stage 1 only needs the extracted text, so an uploaded PDF is
+deleted as soon as it has been read — whether extraction succeeded or not — and anything a
+crash leaves behind in the gitignored `instance/uploads/` is purged at startup.

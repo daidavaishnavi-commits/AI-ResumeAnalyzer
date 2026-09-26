@@ -22,12 +22,12 @@ def main() -> int:
     parser.add_argument("--lines", type=int, default=30, help="how many lines to print")
     parser.add_argument("--json", action="store_true", help="print the full result as JSON")
     parser.add_argument(
-        "--allow-empty", action="store_true", help="do not fail on scanned/empty PDFs"
+        "--strict", action="store_true", help="fail instead of flagging scanned/empty PDFs"
     )
     args = parser.parse_args()
 
     try:
-        result = extraction.extract_text(args.pdf, allow_empty=args.allow_empty)
+        result = extraction.extract_text(args.pdf, strict=args.strict)
     except ResumeIQError as error:
         print(f"error: {error.user_message}", file=sys.stderr)
         if error.technical_detail:

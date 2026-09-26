@@ -83,6 +83,65 @@ def test_build_lines_keeps_repeated_content_when_disabled():
     assert texts.count("Header") == 2
 
 
+def test_build_lines_keeps_legitimate_repeated_skill_lines():
+    """A skill that ends two pages is evidence, not a running footer."""
+    pages = make_pages(
+        "SKILLS\nFlask\nPython",
+        "PROJECTS\nResumeIQ\nPython",
+    )
+    texts = [line.text for line in cleaning.build_lines(pages)]
+
+    assert texts.count("Python") == 2
+
+
+def test_build_lines_still_drops_a_repeated_footer():
+    pages = make_pages(
+        "SKILLS\nPython\nvaishnavi@example.com",
+        "PROJECTS\nResumeIQ\nvaishnavi@example.com",
+    )
+    texts = [line.text for line in cleaning.build_lines(pages)]
+
+    assert "vaishnavi@example.com" not in texts
+    assert texts.count("Python") == 1
+
+
+def test_build_lines_keeps_repeated_text_that_is_not_at_a_page_edge():
+    pages = make_pages(
+        "Alpha\nBeta\nShipped a full release\nGamma\nDelta",
+        "Epsilon\nZeta\nShipped a full release\nEta\nTheta",
+    )
+    texts = [line.text for line in cleaning.build_lines(pages)]
+
+    assert texts.count("Shipped a full release") == 2
+
+
+def test_build_lines_does_not_join_across_a_dropped_line():
+    pages = make_pages(
+        "Machine learn-\n1\nSecond section",
+        "Machine learn-\n2\nSecond section",
+    )
+    texts = [line.text for line in cleaning.build_lines(pages)]
+
+    assert "Machine learn-" in texts
+    assert "Second section" in texts
+    assert "Machine learnSecond section" not in texts
+
+
+def test_build_lines_does_not_join_across_a_blank_line():
+    lines = cleaning.build_lines(make_pages("Machine learn-\n\nSecond section"))
+    assert [line.text for line in lines] == ["Machine learn-", "", "Second section"]
+
+
+def test_page_line_indexes_survive_filtering():
+    """Dropped blanks and page numbers must not shift the stored positions."""
+    pages = make_pages("\n\nSKILLS\n1\nPython")
+    lines = cleaning.build_lines(pages)
+
+    positions = {line.text: line.page_line_index for line in lines}
+    assert positions["SKILLS"] == 2
+    assert positions["Python"] == 4
+
+
 def test_lines_to_text_round_trip():
     lines = cleaning.build_lines(make_pages("Alpha\nBeta"))
     assert cleaning.lines_to_text(lines) == "Alpha\nBeta"

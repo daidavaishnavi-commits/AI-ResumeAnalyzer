@@ -28,9 +28,10 @@ def test_upload_shows_extracted_lines(client, sample_pdf: Path):
     assert "EDUCATION" in body
 
 
-def test_upload_stores_the_file(app, client, sample_pdf: Path):
-    post_pdf(client, sample_pdf)
-    assert len(list(Path(app.config["UPLOAD_FOLDER"]).glob("*.pdf"))) == 1
+def test_upload_does_not_leave_files_behind(app, client, sample_pdf: Path):
+    for _ in range(3):
+        post_pdf(client, sample_pdf)
+    assert list(Path(app.config["UPLOAD_FOLDER"]).glob("*.pdf")) == []
 
 
 def test_upload_rejects_non_pdf_extension(client, sample_pdf: Path):
@@ -43,9 +44,25 @@ def test_upload_rejects_fake_pdf(client, fake_pdf: Path):
     assert b"not a real PDF" in response.data
 
 
-def test_upload_reports_scanned_pdf(client, empty_pdf: Path):
+def test_upload_reports_scanned_pdf_without_failing(client, empty_pdf: Path):
     response = post_pdf(client, empty_pdf)
-    assert b"scanned image" in response.data
+
+    assert response.status_code == 200
+    body = response.data.decode()
+    assert "Extracted text" in body
+    assert "OCR" in body
+
+
+def test_upload_reports_image_only_pdf_as_scanned(client, image_only_pdf: Path):
+    response = post_pdf(client, image_only_pdf)
+
+    assert response.status_code == 200
+    assert "OCR" in response.data.decode()
+
+
+def test_upload_reports_password_protected_pdf(client, encrypted_pdf: Path):
+    response = post_pdf(client, encrypted_pdf)
+    assert b"password protected" in response.data
 
 
 def test_upload_without_file_is_rejected(client):

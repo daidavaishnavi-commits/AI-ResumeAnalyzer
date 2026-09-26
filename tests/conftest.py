@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pypdf
 import pytest
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -52,6 +53,30 @@ def sample_pdf(tmp_path: Path) -> Path:
 def empty_pdf(tmp_path: Path) -> Path:
     """A valid PDF with a single page and almost no text, like a scan."""
     return write_pdf(tmp_path / "scanned.pdf", [["."]])
+
+
+@pytest.fixture
+def image_only_pdf(tmp_path: Path) -> Path:
+    """A structurally valid PDF whose pages carry a drawing but no text."""
+    path = tmp_path / "image_only.pdf"
+    pdf = canvas.Canvas(str(path), pagesize=A4)
+    pdf.rect(80, 500, 300, 200, fill=1)
+    pdf.showPage()
+    pdf.save()
+    return path
+
+
+@pytest.fixture
+def encrypted_pdf(tmp_path: Path) -> Path:
+    """A PDF that cannot be opened without a password."""
+    source = write_pdf(tmp_path / "plain.pdf", SAMPLE_PAGES)
+    path = tmp_path / "locked.pdf"
+
+    writer = pypdf.PdfWriter(clone_from=str(source))
+    writer.encrypt("correct-horse-battery-staple")
+    with path.open("wb") as handle:
+        writer.write(handle)
+    return path
 
 
 @pytest.fixture
